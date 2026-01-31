@@ -1,0 +1,8 @@
+[tools]
+python = "3.12"
+node = "20"
+
+[env]
+PYTHONPATH = "backend"
+DATABASE_URL = "sqlite:///./data/story_threads.db"
+INFACTORY_API_URL = "https://api.atlantic-archive.com/v1"
