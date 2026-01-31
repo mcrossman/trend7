@@ -69,6 +69,46 @@ class UserFeedback(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class Trend(Base):
+    __tablename__ = "trends"
+    
+    trend_id = Column(Integer, primary_key=True, autoincrement=True)
+    keyword = Column(String, nullable=False)
+    trend_score = Column(Integer, nullable=False)  # 0-100 from Google
+    trend_category = Column(String, nullable=False)  # 'rising', 'top', 'breakout'
+    velocity = Column(Float)  # % change (if available)
+    geo_region = Column(String, default="US")
+    recorded_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)  # TTL for cache
+
+
+class TrendArticleMatch(Base):
+    __tablename__ = "trend_article_matches"
+    
+    match_id = Column(Integer, primary_key=True, autoincrement=True)
+    trend_id = Column(Integer, ForeignKey("trends.trend_id"))
+    thread_id = Column(String, ForeignKey("threads.thread_id"))
+    article_id = Column(String, nullable=False)
+    infactory_score = Column(Float, nullable=False)  # Relevance score from Infactory
+    match_score = Column(Float, nullable=False)  # Composite: trend_score * infactory_score
+    surfaced_at = Column(DateTime, default=datetime.utcnow)
+    times_surfaced = Column(Integer, default=1)
+    last_surfaced_at = Column(DateTime)
+
+
+class ProactiveFeedQueue(Base):
+    __tablename__ = "proactive_feed_queue"
+    
+    queue_id = Column(Integer, primary_key=True, autoincrement=True)
+    trend_id = Column(Integer, ForeignKey("trends.trend_id"))
+    thread_id = Column(String, ForeignKey("threads.thread_id"))
+    priority_score = Column(Float, nullable=False)  # For ordering queue
+    status = Column(String, default="pending")  # 'pending', 'sent', 'dismissed'
+    created_at = Column(DateTime, default=datetime.utcnow)
+    sent_at = Column(DateTime)
+    blocks_json = Column(String, nullable=False)  # Pre-formatted Block Kit JSON
+
+
 def create_tables():
     """Create all database tables."""
     Base.metadata.create_all(bind=engine)

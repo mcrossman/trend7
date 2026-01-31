@@ -56,15 +56,21 @@ Architecture for the proof-of-concept implementation of the story thread surfaci
 │  │                                                                        │  │
 │  │  ┌─────────────────────────────────────────────────────────────────┐  │  │
 │  │  │                 Integration Layer                                │  │  │
-│  │  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │  │  │
-│  │  │  │   Infactory  │  │    Google    │  │   Block Kit         │  │  │  │
-│  │  │  │    Client    │  │    Trends    │  │   Formatter         │  │  │  │
-│  │  │  │              │  │    Client    │  │                     │  │  │  │
-│  │  │  │ • Search API │  │              │  │ • Slack blocks →    │  │  │  │
-│  │  │  │ • Article    │  │ • pytrends   │  │   JSON              │  │  │  │
-│  │  │  │   metadata   │  │ • Topic      │  │ • Rich components   │  │  │  │
-│  │  │  │ • Content    │  │   extract    │  │ • Actions           │  │  │  │
-│  │  │  └──────────────┘  └──────────────┘  └──────────────────────┘  │  │  │
+│  │  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │  │  │
+│  │  │  │   Infactory  │  │    Google    │  │   Article   │         │  │  │
+│  │  │  │    Client    │  │    Trends    │  │   Loader    │         │  │  │
+│  │  │  │              │  │    Client    │  │             │         │  │  │
+│  │  │  │ • Search API │  │              │  │ • JSON I/O  │         │  │  │
+│  │  │  │ • Article    │  │ • pytrends   │  │ • Local FS  │         │  │  │
+│  │  │  │   metadata   │  │ • Topic      │  │ • Bulk load │         │  │  │
+│  │  │  │ • Content    │  │   extract    │  │             │         │  │  │
+│  │  │  └──────────────┘  └──────────────┘  └──────────────┘         │  │  │
+│  │  │  ┌──────────────────────────────────────────────────────────┐  │  │  │
+│  │  │  │                    Block Kit Formatter                    │  │  │
+│  │  │  │  • Slack blocks → JSON                                   │  │  │
+│  │  │  │  • Rich components                                       │  │  │
+│  │  │  │  • Actions                                               │  │  │
+│  │  │  └──────────────────────────────────────────────────────────┘  │  │  │
 │  │  └─────────────────────────────────────────────────────────────────┘  │  │
 │  │                                                                        │  │
 │  │  ┌─────────────────────────────────────────────────────────────────┐  │  │
@@ -99,6 +105,7 @@ backend/
 │   │   ├── v1/
 │   │   │   ├── __init__.py
 │   │   │   ├── analyze.py      # Analysis endpoints
+│   │   │   ├── articles.py     # Local article management
 │   │   │   ├── threads.py      # Thread management
 │   │   │   ├── proactive.py    # Proactive suggestions
 │   │   │   ├── feedback.py     # User feedback
@@ -116,6 +123,7 @@ backend/
 │   ├── integrations/
 │   │   ├── __init__.py
 │   │   ├── infactory.py        # Atlantic Archive API client
+│   │   │   ├── article_loader.py   # Local JSON article loader
 │   │   ├── trends.py           # Google Trends client
 │   │   └── cache.py            # Caching utilities
 │   │
@@ -182,6 +190,17 @@ class AnalyzerService:
         # 3. Correlate with Google Trends
         # 4. Cluster into threads
         # 5. Format as Block Kit blocks
+        pass
+    
+    async def analyze_local_article(
+        self,
+        article_id: str,
+        options: AnalysisOptions
+    ) -> AnalysisResult:
+        """
+        Analyze an article from local JSON storage.
+        Falls back to API if not found locally.
+        """
         pass
     
     async def analyze_article(
@@ -311,6 +330,46 @@ The backend doesn't care about the client:
 # CLI: Text rendering of blocks
 ```
 
+#### 4. Local Article Storage
+
+The system supports loading article JSON files directly from local storage, which is useful for:
+
+- **Working offline**: Analyze downloaded articles without API calls
+- **Testing**: Use known article data for reproducible results
+- **Bulk processing**: Import multiple articles from a directory
+- **Debugging**: Inspect article data directly
+
+**Storage Location**: `./data/articles/{article_id}.json`
+
+**Features**:
+- **Explicit access only**: Local storage is NOT automatic fallback; use specific endpoints
+- Bulk import: Load all JSON files from a directory
+- Direct analysis: Analyze article data without storing it
+- CRUD operations: List, upload, retrieve, and delete local articles
+
+**Design Principle**: The Infactory API is the primary source. Local storage is used only when:
+1. Explicitly requested via `/api/v1/analyze/local-article`
+2. The API is unavailable and you need to work offline
+3. Testing with known article data
+
+**Usage Examples**:
+```bash
+# Upload a single article
+curl -X POST /api/v1/articles/upload-json \
+  -H "Content-Type: application/json" \
+  -d '{"article_id": "my_article", "data": {...}}'
+
+# Analyze a local article
+curl -X POST /api/v1/analyze/local-article \
+  -H "Content-Type: application/json" \
+  -d '{"article_id": "my_article"}'
+
+# Bulk import from directory
+curl -X POST /api/v1/articles/bulk-import \
+  -H "Content-Type: application/json" \
+  -d '{"directory": "/path/to/articles"}'
+```
+
 ### API Endpoints
 
 #### POST /api/v1/analyze/text
@@ -350,12 +409,34 @@ Analyze pasted text content.
 ```
 
 #### POST /api/v1/analyze/article
-Analyze specific article by ID.
+Analyze specific article by ID. Checks local storage first, then falls back to API.
 
 **Request:**
 ```json
 {
   "article_id": "atlantic_12345",
+  "options": {...}
+}
+```
+
+#### POST /api/v1/analyze/local-article
+Analyze an article from local JSON storage (./data/articles/{article_id}.json).
+
+**Request:**
+```json
+{
+  "article_id": "atlantic_12345",
+  "options": {...}
+}
+```
+
+#### POST /api/v1/analyze/article-data
+Analyze article data directly without storing it.
+
+**Request:**
+```json
+{
+  "article_data": { ... },
   "options": {...}
 }
 ```
@@ -394,13 +475,45 @@ Submit feedback on a thread.
 }
 ```
 
+#### GET /api/v1/articles
+List all articles stored in local JSON storage.
+
+**Response:**
+```json
+{
+  "articles": ["article_1", "article_2", "article_3"],
+  "total": 3
+}
+```
+
+#### GET /api/v1/articles/{article_id}
+Get a specific article from local storage.
+
+#### POST /api/v1/articles/upload-json
+Upload article data as JSON payload to local storage.
+
+**Request:**
+```json
+{
+  "article_id": "my_article",
+  "data": { ...article_json... }
+}
+```
+
+#### DELETE /api/v1/articles/{article_id}
+Delete an article from local storage.
+
 ### Configuration
+
+See detailed specs:
+- [Environment Configuration](environment-config.md) - Multi-directory .env loading, DEBUG logging
+- [Infactory Integration](infactory-integration.md) - API client with comprehensive logging
 
 **Environment Variables:**
 ```bash
 # API Keys
-INFACTORY_API_KEY=xxx
-INFACTORY_API_URL=https://api.atlantic-archive.com/v1
+INFACTORY_API_KEY=ak_dVKy50Pi0X-7gcOFkey_56yIrKvNt3X0__QjzRN65-k
+INFACTORY_API_URL=https://atlantichack-api.infactory.ai
 
 # Database
 DATABASE_URL=sqlite:///./data/story_threads.db
@@ -421,6 +534,12 @@ PROACTIVE_SCAN_INTERVAL_HOURS=24
 PROACTIVE_BATCH_SIZE=5
 MIN_TREND_VELOCITY=50
 ```
+
+**Configuration Features:**
+- Automatic `.env` discovery from project root, current directory, or file-relative paths
+- Environment variable override support
+- DEBUG logging enabled by default for development
+- Settings cache with reload capability
 
 ## Frontend Design (Next.js)
 
@@ -742,13 +861,34 @@ def handle_message(message, say):
 
 ## Success Criteria
 
-- [ ] Backend API returns Block Kit formatted responses
-- [ ] Frontend renders all Block Kit block types
-- [ ] Text analysis works end-to-end
-- [ ] Article ID lookup works
-- [ ] Proactive feed can be triggered
-- [ ] Feedback collection works
-- [ ] Timeline visualization displays
-- [ ] Thread types (evergreen/event/novel) are distinguishable
-- [ ] Relevance scores are displayed
-- [ ] Google Trends correlation shows when available
+### Completed ✓
+- [x] Backend API framework with FastAPI
+- [x] Infactory API integration with search functionality
+- [x] Comprehensive request/response logging (DEBUG mode)
+- [x] Environment configuration with multi-directory .env support
+- [x] Analyzer service calling Infactory on text analysis
+- [x] Health check and basic API endpoints
+
+### In Progress 🔄
+- [ ] Article ID lookup via Infactory
+
+### Completed ✓
+- [x] Backend API framework with FastAPI
+- [x] Infactory API integration with search functionality
+- [x] Comprehensive request/response logging (DEBUG mode)
+- [x] Environment configuration with multi-directory .env support
+- [x] Analyzer service calling Infactory on text analysis
+- [x] Health check and basic API endpoints
+- [x] Text analysis end-to-end (Infactory connected, result processing working)
+- [x] Block Kit formatted responses with full formatting
+- [x] Thread clustering and classification
+- [x] Article reference extraction from search results
+
+### Pending ⏳
+- [ ] Frontend Block Kit renderer
+- [ ] Proactive feed generation
+- [ ] Feedback collection endpoints
+- [ ] Timeline visualization
+- [ ] Thread type classification (evergreen/event/novel)
+- [ ] Relevance scoring display
+- [ ] Google Trends correlation

@@ -1,19 +1,31 @@
 import httpx
+import logging
+import sys
 from typing import Optional, List, Dict, Any
 
-from app.config import get_settings
+from app.config import get_settings, Settings
 
-settings = get_settings()
+logger = logging.getLogger(__name__)
+
+# Debug print helper that always works
+def debug_print(msg: str):
+    """Print to stderr immediately - bypasses logging config issues."""
+    print(f"[INFACTORY] {msg}", file=sys.stderr, flush=True)
 
 
 class InfactoryClient:
     """
     Client for Atlantic Archive (Infactory) API.
+    Primary API client - does NOT fall back to local storage automatically.
+    Local storage is used only when explicitly requested via local-article endpoints.
     """
     
     def __init__(self):
+        settings = get_settings()
         self.api_key = settings.infactory_api_key
         self.base_url = settings.infactory_api_url
+        debug_print(f"Client initialized - base_url: {self.base_url}, api_key: {'YES' if self.api_key else 'NO'}")
+        logger.info(f"InfactoryClient initialized - base_url: {self.base_url}, api_key present: {bool(self.api_key)}")
         self.client = httpx.AsyncClient(
             base_url=self.base_url,
             headers={"x-api-key": self.api_key} if self.api_key else {},
@@ -47,18 +59,41 @@ class InfactoryClient:
         if date_to:
             payload["date_to"] = date_to
         
+        url = f"{self.base_url}/v1/search"
+        debug_print(f"REQUEST: POST {url}")
+        debug_print(f"REQUEST PAYLOAD: {payload}")
+        logger.info(f"Infactory REQUEST: POST {url}")
+        logger.info(f"Infactory REQUEST PAYLOAD: {payload}")
+        
         response = await self.client.post("/v1/search", json=payload)
+        debug_print(f"RESPONSE status: {response.status_code}")
+        logger.info(f"Infactory RESPONSE status: {response.status_code}")
+        
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+        results_count = len(data.get('results', []))
+        debug_print(f"Search returned {results_count} results for query: {query}")
+        debug_print(f"RESPONSE DATA: {data}")
+        logger.info(f"Infactory search returned {results_count} results for query: {query}")
+        logger.info(f"Infactory RESPONSE DATA: {data}")
+        return data
     
     async def get_article(self, article_id: str) -> Dict[str, Any]:
-        """Get article metadata."""
+        """
+        Get article metadata from API.
+        Raises HTTPError on failure.
+        """
+        debug_print(f"Getting article: {article_id}")
         response = await self.client.get(f"/v1/articles/{article_id}")
+        debug_print(f"Article response status: {response.status_code}")
         response.raise_for_status()
         return response.json()
     
     async def get_article_content(self, article_id: str) -> Dict[str, Any]:
-        """Get full article content."""
+        """
+        Get full article content from API.
+        Raises HTTPError on failure.
+        """
         response = await self.client.get(f"/v1/articles/{article_id}/content")
         response.raise_for_status()
         return response.json()

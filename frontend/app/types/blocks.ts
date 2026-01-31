@@ -119,3 +119,27 @@ export interface ProactiveResponse {
     threads: Thread[];
   };
 }
+
+// Trends demo types
+export interface TrendInfo {
+  keyword: string;
+  score: number;
+  category: 'rising' | 'top' | 'breakout';
+  velocity?: number;
+}
+
+export interface TrendMatch {
+  trend_keyword: string;
+  thread_id: string;
+  priority_score: number;
+  status: string;
+}
+
+export interface TrendsDemoResponse {
+  success: boolean;
+  message: string;
+  trends_found: number;
+  trends: TrendInfo[];
+  queue_entries_added: number;
+  top_matches: TrendMatch[];
+}

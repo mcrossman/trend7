@@ -75,6 +75,14 @@ class ArticleReference(BaseModel):
     relevance_score: float
 
 
+class TrendContext(BaseModel):
+    """Trend context for a thread when query matches current trends."""
+    keyword: str
+    score: int  # 0-100 trend score
+    category: str  # 'rising', 'top', 'breakout'
+    velocity: Optional[float] = None  # % change
+
+
 class Thread(BaseModel):
     thread_id: str
     thread_type: Literal["evergreen", "event_driven", "novel_concept"]
@@ -83,6 +91,7 @@ class Thread(BaseModel):
     articles: List[ArticleReference]
     blocks: List[Block]
     explanation: Optional[str] = None
+    trend_context: Optional[TrendContext] = None  # Set if thread matches a current trend
 
 
 class AnalysisOptions(BaseModel):
@@ -96,3 +105,4 @@ class AnalysisResult(BaseModel):
     query_id: str
     threads: List[Thread]
     extracted_topics: List[str]
+    trend_matches: List[TrendContext] = []  # Any trends that matched the query

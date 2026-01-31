@@ -1,7 +1,29 @@
+import logging
+import sys
+
+# Configure root logger BEFORE any other imports - this ensures uvicorn doesn't override it
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ],
+    force=True  # Force reconfiguration even if logging was already configured
+)
+
+# Set all relevant loggers to DEBUG
+for logger_name in ['app', 'app.integrations', 'app.integrations.infactory', 'httpx', 'httpcore']:
+    logging.getLogger(logger_name).setLevel(logging.DEBUG)
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1 import analyze, threads, proactive, feedback, topics, health
+from app.api.v1 import analyze, threads, proactive, feedback, topics, health, articles, trends
+
+logger = logging.getLogger(__name__)
+logger.info("="*60)
+logger.info("BACKEND STARTING - DEBUG LOGGING ENABLED")
+logger.info("="*60)
 
 app = FastAPI(
     title="Story Thread Surfacing API",
@@ -25,6 +47,8 @@ app.include_router(threads.router, prefix="/api/v1/threads", tags=["threads"])
 app.include_router(proactive.router, prefix="/api/v1/proactive", tags=["proactive"])
 app.include_router(feedback.router, prefix="/api/v1/feedback", tags=["feedback"])
 app.include_router(topics.router, prefix="/api/v1/topics", tags=["topics"])
+app.include_router(articles.router, prefix="/api/v1/articles", tags=["articles"])
+app.include_router(trends.router, prefix="/api/v1/trends", tags=["trends"])
 
 
 @app.get("/")
