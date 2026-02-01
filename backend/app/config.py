@@ -55,6 +55,17 @@ class Settings(BaseSettings):
     trends_max_results: int = 10
     trends_threshold: float = 0.10
     
+    # Section and Confidence Thresholds
+    min_story_score: float = 0.005  # Minimum score for individual stories (lowered for RRF scores)
+    min_articles_per_section: int = 1  # Minimum articles needed per section
+    min_sections_with_matches: int = 1  # Minimum sections that must have matches
+    min_overall_confidence: float = 0.01  # Minimum overall confidence to show message (lowered)
+    min_total_articles: int = 2  # Minimum total articles across all sections
+    max_sections_to_show: int = 5  # Maximum sections to display
+    enable_section_grouping: bool = True  # Enable section-based grouping
+    enable_confidence_scoring: bool = True  # Enable confidence calculation
+    show_empty_sections: bool = False  # Show sections with 0 matches
+    
     # Proactive feed
     proactive_deduplicate_hours: int = 24
     

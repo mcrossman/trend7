@@ -6,7 +6,7 @@ interface ActionsBlockRendererProps {
 }
 
 export function ActionsBlockRenderer({ block, onAction }: ActionsBlockRendererProps) {
-  const handleClick = (element: any) => {
+  const handleClick = (element: { action_id?: string; value?: string; style?: 'primary' | 'danger' }) => {
     if (onAction) {
       onAction(element.action_id || 'button', element.value || '');
     }
@@ -20,10 +20,10 @@ export function ActionsBlockRenderer({ block, onAction }: ActionsBlockRendererPr
           onClick={() => handleClick(element)}
           className={`px-4 py-2 text-sm font-medium rounded transition-colors ${
             element.style === 'primary'
-              ? 'bg-blue-600 text-white hover:bg-blue-700'
+              ? 'bg-primary text-primary-foreground hover:bg-primary/90'
               : element.style === 'danger'
-              ? 'bg-red-600 text-white hover:bg-red-700'
-              : 'bg-gray-200 text-gray-800 hover:bg-gray-300'
+              ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
+              : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
           }`}
         >
           {element.text.text}

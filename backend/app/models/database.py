@@ -84,13 +84,15 @@ class Trend(Base):
 
 class TrendArticleMatch(Base):
     __tablename__ = "trend_article_matches"
-    
+
     match_id = Column(Integer, primary_key=True, autoincrement=True)
     trend_id = Column(Integer, ForeignKey("trends.trend_id"))
     thread_id = Column(String, ForeignKey("threads.thread_id"))
     article_id = Column(String, nullable=False)
     infactory_score = Column(Float, nullable=False)  # Relevance score from Infactory
     match_score = Column(Float, nullable=False)  # Composite: trend_score * infactory_score
+    story_score = Column(Float, nullable=False, default=0.0)  # Per-story score
+    section = Column(String(50))  # Atlantic section (Politics, Culture, etc.)
     surfaced_at = Column(DateTime, default=datetime.utcnow)
     times_surfaced = Column(Integer, default=1)
     last_surfaced_at = Column(DateTime)
@@ -98,7 +100,7 @@ class TrendArticleMatch(Base):
 
 class ProactiveFeedQueue(Base):
     __tablename__ = "proactive_feed_queue"
-    
+
     queue_id = Column(Integer, primary_key=True, autoincrement=True)
     trend_id = Column(Integer, ForeignKey("trends.trend_id"))
     thread_id = Column(String, ForeignKey("threads.thread_id"))
@@ -107,6 +109,10 @@ class ProactiveFeedQueue(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     sent_at = Column(DateTime)
     blocks_json = Column(String, nullable=False)  # Pre-formatted Block Kit JSON
+    overall_confidence = Column(Float)  # Overall confidence score (0.0-1.0)
+    confidence_level = Column(String(20))  # very_high, high, medium, low, very_low
+    sections_involved = Column(Integer)  # Number of sections with matches
+    total_articles = Column(Integer)  # Total articles across all sections
 
 
 def create_tables():

@@ -1,3 +1,3 @@
 export function DividerBlockRenderer() {
-  return <hr className="border-gray-200 my-3" />;
+  return <hr className="border-border my-3" />;
 }

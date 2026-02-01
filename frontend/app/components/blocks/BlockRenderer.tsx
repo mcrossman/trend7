@@ -46,8 +46,8 @@ function BlockComponent({ block, onAction }: BlockComponentProps) {
       return <TimelineBlockRenderer block={block} />;
     default:
       return (
-        <div className="text-sm text-red-500 p-2 bg-red-50 rounded">
-          Unknown block type: {(block as any).type}
+        <div className="text-sm text-destructive p-2 bg-destructive/10 rounded">
+          Unknown block type
         </div>
       );
   }

@@ -18,7 +18,7 @@ for logger_name in ['app', 'app.integrations', 'app.integrations.infactory', 'ht
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1 import analyze, threads, proactive, feedback, topics, health, articles, trends
+from app.api.v1 import analyze, threads, proactive, feedback, topics, health, articles, trends, pitches
 
 logger = logging.getLogger(__name__)
 logger.info("="*60)
@@ -49,6 +49,7 @@ app.include_router(feedback.router, prefix="/api/v1/feedback", tags=["feedback"]
 app.include_router(topics.router, prefix="/api/v1/topics", tags=["topics"])
 app.include_router(articles.router, prefix="/api/v1/articles", tags=["articles"])
 app.include_router(trends.router, prefix="/api/v1/trends", tags=["trends"])
+app.include_router(pitches.router, prefix="/api/v1/pitches", tags=["pitches"])
 
 
 @app.get("/")

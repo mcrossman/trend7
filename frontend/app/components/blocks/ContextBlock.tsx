@@ -1,36 +1,36 @@
-import { ContextBlock } from '@/app/types/blocks';
+import { ContextBlock, ImageElement, TextObject } from '@/app/types/blocks';
 
 interface ContextBlockRendererProps {
   block: ContextBlock;
 }
 
 export function ContextBlockRenderer({ block }: ContextBlockRendererProps) {
-  const renderElement = (element: any, idx: number) => {
+  const renderElement = (element: TextObject | ImageElement, idx: number) => {
     if (element.type === 'mrkdwn') {
       return (
-        <span 
+        <span
           key={idx}
-          className="text-xs text-gray-500"
+          className="text-xs text-muted-foreground"
           dangerouslySetInnerHTML={{
-            __html: element.text
-              .replace(/\*(.+?)\*/g, '<strong class="text-gray-700">$1</strong>')
+            __html: (element as TextObject).text
+              .replace(/\*(.+?)\*/g, '<strong class="text-foreground">$1</strong>')
           }}
         />
       );
     }
     if (element.type === 'plain_text') {
       return (
-        <span key={idx} className="text-xs text-gray-500">
-          {element.text}
+        <span key={idx} className="text-xs text-muted-foreground">
+          {(element as TextObject).text}
         </span>
       );
     }
     if (element.type === 'image') {
       return (
-        <img 
+        <img
           key={idx}
-          src={element.image_url}
-          alt={element.alt_text}
+          src={(element as ImageElement).image_url}
+          alt={(element as ImageElement).alt_text}
           className="w-4 h-4 rounded"
         />
       );

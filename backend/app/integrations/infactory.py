@@ -105,6 +105,57 @@ class InfactoryClient:
         data = response.json()
         return data.get("topics", [])
     
+    async def answer(
+        self,
+        query: str,
+        top_k: int = 12,
+        filters: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Answer a question based on retrieved archive content.
+        
+        Uses the /v1/answer endpoint which is similar to summarize but includes
+        suggested follow-up questions. Perfect for generating story pitches.
+        
+        Args:
+            query: The question to answer (max 500 chars)
+            top_k: Number of chunks to retrieve (1-20, default: 12)
+            filters: Optional filters dict with:
+                - topics: List[str]
+                - authors: List[str]
+                - sections: List[str]
+                - date_from: str (YYYY-MM-DD)
+                - date_to: str (YYYY-MM-DD)
+        
+        Returns:
+            Dict with answer, citations, and follow-up suggestions
+        """
+        payload = {
+            "query": query,
+            "retrieval": {
+                "top_k": top_k
+            }
+        }
+        
+        if filters:
+            payload["retrieval"]["filters"] = filters
+        
+        url = f"{self.base_url}/v1/answer"
+        debug_print(f"REQUEST: POST {url}")
+        debug_print(f"REQUEST PAYLOAD: {payload}")
+        logger.info(f"Infactory ANSWER REQUEST: POST {url}")
+        logger.info(f"Infactory ANSWER PAYLOAD: {payload}")
+        
+        response = await self.client.post("/v1/answer", json=payload)
+        debug_print(f"RESPONSE status: {response.status_code}")
+        logger.info(f"Infactory ANSWER RESPONSE status: {response.status_code}")
+        
+        response.raise_for_status()
+        data = response.json()
+        debug_print(f"ANSWER RESPONSE DATA: {data}")
+        logger.info(f"Infactory ANSWER RESPONSE DATA: {data}")
+        return data
+    
     async def close(self):
         """Close HTTP client."""
         await self.client.aclose()

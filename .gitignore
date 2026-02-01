@@ -24,7 +24,7 @@ wheels/
 *.egg
 
 # Database
-*.db
+# *.db
 *.sqlite
 *.sqlite3
 
@@ -52,6 +52,6 @@ Thumbs.db
 
 # Data
 data/
-*.db
+# *.db
 *.sqlite
 *.sqlite3

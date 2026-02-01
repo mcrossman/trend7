@@ -648,6 +648,13 @@ trend_velocity_multiplier:
 3. ✅ Update Block Kit templates for trend indicators (`format_thread_result_with_trend`)
 4. ✅ Add trend data to thread models (`trend_context` field on `Thread`)
 
+### Phase 4: Caching & Rate Limiting ✅ COMPLETE
+1. ✅ **Cache-First Strategy**: Frontend uses cached data by default
+2. ✅ **Force Refresh Toggle**: Users can opt-in to fetch fresh trends (with warnings)
+3. ✅ **Rate Limiting**: Exponential backoff with 5s base delay, up to 60s max
+4. ✅ **Demo Data Fallback**: Returns realistic demo trends when API is rate limited
+5. ✅ **Cached Trends Display**: Shows cached trends immediately on component mount
+
 ## Success Metrics
 
 - **Coverage**: % of daily trends matched to Atlantic articles

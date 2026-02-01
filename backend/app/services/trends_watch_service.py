@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 
@@ -6,8 +6,11 @@ from app.config import get_settings
 from app.integrations.trends import TrendsClient, Trend
 from app.integrations.infactory import InfactoryClient
 from app.services.analyzer import AnalyzerService
+from app.services.confidence_calculator import ConfidenceCalculator, create_section_groups
 from app.models.database import Trend as TrendModel, TrendArticleMatch, ProactiveFeedQueue
-from app.models.schemas import AnalysisOptions
+from app.models.schemas import (
+    AnalysisOptions, ArticleReference, TrendMessageResult, ThresholdConfig
+)
 from app.services.block_formatter import BlockFormatter
 
 settings = get_settings()
@@ -17,12 +20,13 @@ class TrendsWatchService:
     """
     Periodic trend watcher that searches archive and populates proactive queue.
     
-    This service:
+    Enhanced with section-aware search and confidence scoring:
     1. Fetches current trends (from cache or Google Trends)
     2. Filters to significant trends (rising/top with score >= threshold)
-    3. Searches Infactory for relevant Atlantic articles
-    4. Creates thread matches with composite scoring
-    5. Queues proactive suggestions for delivery
+    3. Searches Infactory for relevant Atlantic articles (with section grouping)
+    4. Calculates per-story scores and overall confidence
+    5. Creates trend message results with section groups
+    6. Queues proactive suggestions for delivery
     """
     
     def __init__(
@@ -31,13 +35,15 @@ class TrendsWatchService:
         trends_client: Optional[TrendsClient] = None,
         infactory_client: Optional[InfactoryClient] = None,
         analyzer_service: Optional[AnalyzerService] = None,
-        formatter: Optional[BlockFormatter] = None
+        formatter: Optional[BlockFormatter] = None,
+        confidence_calculator: Optional[ConfidenceCalculator] = None
     ):
         self.db = db
         self.trends = trends_client or TrendsClient()
         self.infactory = infactory_client or InfactoryClient()
         self.analyzer = analyzer_service or AnalyzerService()
         self.formatter = formatter or BlockFormatter()
+        self.confidence = confidence_calculator or ConfidenceCalculator()
     
     async def watch_and_populate(self) -> int:
         """
@@ -63,9 +69,9 @@ class TrendsWatchService:
         new_entries = 0
         for trend in significant_trends:
             try:
-                matches = await self._find_articles_for_trend(trend)
-                if matches:
-                    queued = await self._queue_proactive_suggestions(trend, matches)
+                trend_result = await self._find_articles_for_trend(trend)
+                if trend_result and trend_result.threshold_met:
+                    queued = await self._queue_proactive_suggestions(trend, trend_result)
                     new_entries += queued
             except Exception as e:
                 print(f"Error processing trend '{trend.keyword}': {e}")
@@ -133,22 +139,34 @@ class TrendsWatchService:
         
         self.db.commit()
     
-    async def _find_articles_for_trend(self, trend: Trend) -> List[dict]:
+    async def _find_articles_for_trend(self, trend: Trend) -> Optional[TrendMessageResult]:
         """
-        Search Infactory for articles matching this trend.
-        Returns list of scored matches.
+        Search Infactory for articles matching this trend with section awareness.
+        
+        Returns a TrendMessageResult with confidence scores and section groups.
         """
         print(f"Searching for articles related to trend: {trend.keyword}")
         
-        # Search with the trend keyword
-        results = await self.infactory.search(
-            query=trend.keyword,
-            limit=settings.trends_max_results
-        )
+        # Search with section grouping enabled
+        try:
+            results = await self.infactory.search(
+                query=trend.keyword,
+                limit=settings.trends_max_results,
+                group_by='section' if settings.enable_section_grouping else None
+            )
+        except Exception as e:
+            print(f"Error searching Infactory for trend '{trend.keyword}': {e}")
+            return None
         
-        if not results or not results.get('results'):
+        # Check for results in both flat and grouped formats
+        has_results = (
+            results and 
+            (results.get('results') or 
+             (results.get('data') and results['data'].get('groups')))
+        )
+        if not has_results:
             print(f"No Infactory results for trend: {trend.keyword}")
-            return []
+            return None
         
         # Create thread from results using analyzer
         try:
@@ -161,54 +179,116 @@ class TrendsWatchService:
             )
         except Exception as e:
             print(f"Error analyzing trend '{trend.keyword}': {e}")
-            return []
+            return None
         
         if not analysis.threads:
             print(f"No threads created for trend: {trend.keyword}")
-            return []
+            return None
         
-        # Score each match: trend_score * infactory_relevance
-        matches = []
+        # Collect all articles and calculate story scores
+        all_articles: List[ArticleReference] = []
         for thread in analysis.threads:
             for article in thread.articles:
-                match_score = (trend.trend_score / 100) * article.relevance_score
+                # Calculate per-story score
+                article.story_score = self.confidence.calculate_story_score(article, trend)
                 
-                if match_score >= settings.min_match_score:
-                    matches.append({
-                        'trend': trend,
-                        'thread': thread,
-                        'article': article,
-                        'infactory_score': article.relevance_score,
-                        'match_score': match_score
-                    })
+                # Try to extract section from metadata if available
+                # This would come from Infactory results when group_by=section is used
+                article.section = self._extract_section_from_result(
+                    results, article.article_id
+                )
+                
+                all_articles.append(article)
         
-        # Sort by match score descending
-        matches.sort(key=lambda x: x['match_score'], reverse=True)
+        # Filter by min_story_score threshold
+        filtered_articles = [
+            art for art in all_articles 
+            if art.story_score >= settings.min_story_score
+        ]
         
-        print(f"Found {len(matches)} article matches for trend: {trend.keyword}")
-        return matches
+        if not filtered_articles:
+            print(f"No articles meet min_story_score threshold for trend: {trend.keyword}")
+            return None
+        
+        # Calculate overall confidence
+        confidence_factors = self.confidence.calculate_overall_confidence(
+            filtered_articles, trend
+        )
+        
+        # Create section groups
+        section_groups = create_section_groups(filtered_articles)
+        
+        # Check if threshold is met
+        threshold_met = confidence_factors.threshold_penalty == 0.0
+        
+        # Get the primary thread (highest relevance)
+        primary_thread = max(analysis.threads, key=lambda t: t.relevance_score)
+        
+        # Format blocks with section grouping and confidence
+        blocks = self.formatter.format_trend_thread_with_sections(
+            trend=trend,
+            thread=primary_thread,
+            articles=filtered_articles,
+            section_groups=section_groups,
+            confidence_factors=confidence_factors,
+            threshold_met=threshold_met
+        )
+        
+        print(f"Found {len(filtered_articles)} articles across {len(section_groups)} sections for trend: {trend.keyword}")
+        print(f"Overall confidence: {confidence_factors.final_confidence:.2f} (threshold met: {threshold_met})")
+        
+        return TrendMessageResult(
+            trend_keyword=trend.keyword,
+            trend_score=trend.trend_score,
+            trend_category=trend.trend_category,
+            trend_velocity=trend.velocity,
+            overall_confidence=confidence_factors.final_confidence,
+            confidence_level=self.confidence.get_confidence_level(confidence_factors.final_confidence),
+            confidence_factors=confidence_factors,
+            section_groups=section_groups,
+            total_articles=len(filtered_articles),
+            sections_with_matches=len(section_groups),
+            blocks=blocks,
+            threshold_met=threshold_met
+        )
     
-    async def _queue_proactive_suggestions(self, trend: Trend, matches: List[dict]) -> int:
+    def _extract_section_from_result(
+        self, 
+        search_results: Dict[str, Any], 
+        article_id: str
+    ) -> Optional[str]:
         """
-        Add trend matches to proactive feed queue.
+        Extract section from search results for a given article ID.
+        
+        When Infactory returns grouped results, we can extract section info.
+        """
+        # Try to find section in results metadata
+        results = search_results.get('results', [])
+        for result in results:
+            metadata = result.get('metadata', {})
+            if metadata.get('id') == article_id or result.get('id') == article_id:
+                # Check for section in various possible fields
+                for field in ['section', 'category', 'department', 'desk']:
+                    section = metadata.get(field)
+                    if section:
+                        return section.lower()
+        
+        # Default to 'general' if not found
+        return 'general'
+    
+    async def _queue_proactive_suggestions(
+        self, 
+        trend: Trend, 
+        trend_result: TrendMessageResult
+    ) -> int:
+        """
+        Add trend matches to proactive feed queue with confidence and section data.
+        
         Returns number of new queue entries.
         """
-        if not matches:
+        if not trend_result.threshold_met:
+            print(f"Skipping trend '{trend.keyword}' - threshold not met")
             return 0
-        
-        # Group matches by thread
-        threads_dict = {}
-        for match in matches:
-            thread_id = match['thread'].thread_id
-            if thread_id not in threads_dict:
-                threads_dict[thread_id] = {
-                    'thread': match['thread'],
-                    'trend': match['trend'],
-                    'articles': [],
-                    'total_score': 0
-                }
-            threads_dict[thread_id]['articles'].append(match)
-            threads_dict[thread_id]['total_score'] += match['match_score']
         
         # Get or create trend in DB
         db_trend = self.db.query(TrendModel).filter(
@@ -229,66 +309,72 @@ class TrendsWatchService:
             self.db.add(db_trend)
             self.db.flush()  # Get trend_id
         
-        new_entries = 0
+        # Use primary thread_id from section groups
+        thread_id = f"thread_{trend.keyword.replace(' ', '_').lower()}"
+        if trend_result.section_groups:
+            # Use first article's thread as identifier
+            first_article = trend_result.section_groups[0].articles[0] if trend_result.section_groups[0].articles else None
+            if first_article:
+                thread_id = f"trend_thread_{trend.keyword.replace(' ', '_').lower()}"
         
-        for thread_id, thread_data in threads_dict.items():
-            # Check for duplicates (same trend + thread within deduplicate window)
-            recent_match = self.db.query(TrendArticleMatch).join(TrendModel).filter(
-                TrendArticleMatch.thread_id == thread_id,
-                TrendModel.keyword == trend.keyword,
-                TrendArticleMatch.surfaced_at > datetime.utcnow() - timedelta(hours=settings.proactive_deduplicate_hours)
-            ).first()
-            
-            if recent_match:
-                # Update existing match
-                recent_match.times_surfaced += 1
-                recent_match.last_surfaced_at = datetime.utcnow()
-                print(f"Updated existing match for thread {thread_id}")
-                continue
-            
-            # Create trend article matches
-            for match in thread_data['articles']:
+        # Check for duplicates
+        recent_match = self.db.query(TrendArticleMatch).join(TrendModel).filter(
+            TrendArticleMatch.thread_id == thread_id,
+            TrendModel.keyword == trend.keyword,
+            TrendArticleMatch.surfaced_at > datetime.utcnow() - timedelta(hours=settings.proactive_deduplicate_hours)
+        ).first()
+        
+        if recent_match:
+            # Update existing match
+            recent_match.times_surfaced += 1
+            recent_match.last_surfaced_at = datetime.utcnow()
+            print(f"Updated existing match for thread {thread_id}")
+            self.db.commit()
+            return 0
+        
+        # Create trend article matches with section info
+        for section_group in trend_result.section_groups:
+            for article in section_group.articles:
                 db_match = TrendArticleMatch(
                     trend_id=db_trend.trend_id,
                     thread_id=thread_id,
-                    article_id=match['article'].article_id,
-                    infactory_score=match['infactory_score'],
-                    match_score=match['match_score'],
+                    article_id=article.article_id,
+                    infactory_score=article.relevance_score,
+                    match_score=article.story_score,
+                    story_score=article.story_score,
+                    section=section_group.section_name.lower(),
                     surfaced_at=datetime.utcnow(),
                     times_surfaced=1,
                     last_surfaced_at=datetime.utcnow()
                 )
                 self.db.add(db_match)
-            
-            # Calculate priority score
-            velocity_multiplier = 1.5 if trend.trend_category == 'rising' else 1.2
-            priority_score = thread_data['total_score'] * velocity_multiplier
-            
-            # Format blocks for this trend thread
-            blocks = self.formatter.format_trend_thread(
-                trend=trend,
-                thread=thread_data['thread'],
-                articles=[m['article'] for m in thread_data['articles'][:5]]  # Top 5 articles
-            )
-            
-            import json
-            
-            # Add to proactive queue
-            queue_entry = ProactiveFeedQueue(
-                trend_id=db_trend.trend_id,
-                thread_id=thread_id,
-                priority_score=priority_score,
-                status='pending',
-                created_at=datetime.utcnow(),
-                blocks_json=json.dumps([b.model_dump() if hasattr(b, 'model_dump') else b for b in blocks])
-            )
-            self.db.add(queue_entry)
-            new_entries += 1
-            
-            print(f"Queued trend thread: {trend.keyword} -> {thread_data['thread'].central_topic} (priority: {priority_score:.2f})")
+        
+        # Calculate priority score
+        velocity_multiplier = 1.5 if trend.trend_category == 'rising' else 1.2
+        priority_score = trend_result.overall_confidence * velocity_multiplier
+        
+        import json
+        
+        # Add to proactive queue with confidence and section data
+        queue_entry = ProactiveFeedQueue(
+            trend_id=db_trend.trend_id,
+            thread_id=thread_id,
+            priority_score=priority_score,
+            status='pending',
+            created_at=datetime.utcnow(),
+            blocks_json=json.dumps([b.model_dump() if hasattr(b, 'model_dump') else b for b in trend_result.blocks]),
+            overall_confidence=trend_result.overall_confidence,
+            confidence_level=trend_result.confidence_level,
+            sections_involved=trend_result.sections_with_matches,
+            total_articles=trend_result.total_articles
+        )
+        self.db.add(queue_entry)
         
         self.db.commit()
-        return new_entries
+        
+        print(f"Queued trend thread: {trend.keyword} -> {trend_result.total_articles} articles across {trend_result.sections_with_matches} sections (confidence: {trend_result.overall_confidence:.2f})")
+        
+        return 1
     
     def get_pending_queue(self, limit: int = 10) -> List[ProactiveFeedQueue]:
         """Get pending items from proactive queue, ordered by priority."""

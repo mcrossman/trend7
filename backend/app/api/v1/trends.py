@@ -51,6 +51,10 @@ class QueueItemResponse(BaseModel):
     priority_score: float
     status: str
     created_at: str
+    overall_confidence: Optional[float]
+    confidence_level: Optional[str]
+    sections_involved: Optional[int]
+    total_articles: Optional[int]
 
 
 class QueueResponse(BaseModel):
@@ -58,6 +62,54 @@ class QueueResponse(BaseModel):
     success: bool
     count: int
     items: List[QueueItemResponse]
+
+
+class SectionInfoResponse(BaseModel):
+    """Information about a section."""
+    name: str
+    emoji: str
+    total_matches_24h: int
+
+
+class SectionsResponse(BaseModel):
+    """Response with available sections."""
+    success: bool
+    sections: List[SectionInfoResponse]
+
+
+class ConfidenceFactorsResponse(BaseModel):
+    """Confidence calculation breakdown."""
+    base_confidence: float
+    article_count_bonus: float
+    diversity_multiplier: float
+    velocity_multiplier: float
+    threshold_penalty: float
+    final_confidence: float
+
+
+class SectionGroupResponse(BaseModel):
+    """Articles grouped by section."""
+    section_name: str
+    section_emoji: str
+    article_count: int
+    average_score: float
+    confidence_contribution: float
+    articles: List[dict]
+
+
+class TrendMessageResponse(BaseModel):
+    """Enhanced trend message with sections and confidence."""
+    trend_keyword: str
+    trend_score: int
+    trend_category: str
+    trend_velocity: Optional[float]
+    overall_confidence: float
+    confidence_level: str
+    confidence_factors: ConfidenceFactorsResponse
+    total_articles: int
+    sections_with_matches: int
+    section_groups: List[SectionGroupResponse]
+    threshold_met: bool
 
 
 class InterestOverTimeRequest(BaseModel):
@@ -195,7 +247,11 @@ async def get_proactive_queue(
                     thread_id=item.ProactiveFeedQueue.thread_id,
                     priority_score=item.ProactiveFeedQueue.priority_score,
                     status=item.ProactiveFeedQueue.status,
-                    created_at=item.ProactiveFeedQueue.created_at.isoformat()
+                    created_at=item.ProactiveFeedQueue.created_at.isoformat(),
+                    overall_confidence=float(item.ProactiveFeedQueue.overall_confidence) if item.ProactiveFeedQueue.overall_confidence else None,
+                    confidence_level=item.ProactiveFeedQueue.confidence_level,
+                    sections_involved=item.ProactiveFeedQueue.sections_involved,
+                    total_articles=item.ProactiveFeedQueue.total_articles
                 )
                 for item in items
             ]
@@ -229,6 +285,52 @@ async def get_interest_over_time(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching interest data: {str(e)}")
+
+
+@router.get("/sections", response_model=SectionsResponse)
+async def get_sections(
+    db: Session = Depends(get_db)
+):
+    """
+    Get available Atlantic sections and their match statistics.
+    
+    Returns sections with emojis and recent match counts from the last 24 hours.
+    """
+    try:
+        from datetime import datetime, timedelta
+        from app.models.schemas import SECTION_EMOJIS
+        from app.models.database import TrendArticleMatch
+        
+        # Get matches from last 24 hours
+        recent_matches = db.query(TrendArticleMatch).filter(
+            TrendArticleMatch.surfaced_at > datetime.utcnow() - timedelta(hours=24)
+        ).all()
+        
+        # Count matches per section
+        section_counts = {}
+        for match in recent_matches:
+            section = match.section or 'general'
+            section_counts[section] = section_counts.get(section, 0) + 1
+        
+        # Build response
+        sections = []
+        for section_name, emoji in SECTION_EMOJIS.items():
+            sections.append(SectionInfoResponse(
+                name=section_name.title(),
+                emoji=emoji,
+                total_matches_24h=section_counts.get(section_name.lower(), 0)
+            ))
+        
+        # Sort by match count descending
+        sections.sort(key=lambda s: s.total_matches_24h, reverse=True)
+        
+        return SectionsResponse(
+            success=True,
+            sections=sections
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching sections: {str(e)}")
 
 
 @router.post("/queue/{queue_id}/send")
@@ -319,7 +421,7 @@ async def demo_trigger_trends_watch(
             top_matches.append({
                 "trend_keyword": trend.keyword if trend else "Unknown",
                 "thread_id": item.thread_id,
-                "priority_score": round(item.priority_score, 2),
+                "priority_score": round(float(item.priority_score), 2) if item.priority_score else 0.0,
                 "status": item.status
             })
         
@@ -345,4 +447,42 @@ async def demo_trigger_trends_watch(
         raise HTTPException(
             status_code=500, 
             detail=f"Error running demo trigger: {str(e)}\n{traceback.format_exc()}"
+        )
+
+
+class PurgeQueueResponse(BaseModel):
+    """Response from queue purge operation."""
+    success: bool
+    deleted_count: int
+    message: str
+
+
+@router.post("/queue/purge", response_model=PurgeQueueResponse)
+async def purge_queue(
+    db: Session = Depends(get_db)
+):
+    """
+    Purge all entries from the proactive feed queue.
+    
+    This deletes all pending, sent, and dismissed queue entries.
+    Use this to force regeneration of trend blocks with new formatting.
+    
+    Note: This only removes queue entries. The underlying trend data 
+    from Google Trends is preserved and will be rematched on the next watch cycle.
+    """
+    try:
+        # Delete all queue entries
+        deleted = db.query(ProactiveFeedQueue).delete()
+        db.commit()
+        
+        return PurgeQueueResponse(
+            success=True,
+            deleted_count=deleted,
+            message=f"✅ Purged {deleted} queue entries"
+        )
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error purging queue: {str(e)}"
         )

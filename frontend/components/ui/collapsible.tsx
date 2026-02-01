@@ -5,28 +5,29 @@ import { CaretDown, CaretRight } from '@phosphor-icons/react';
 
 interface CollapsibleProps {
   children: ReactNode;
-  title: string;
+  title: ReactNode;
   defaultOpen?: boolean;
+  className?: string;
 }
 
-export function Collapsible({ children, title, defaultOpen = false }: CollapsibleProps) {
+export function Collapsible({ children, title, defaultOpen = false, className = '' }: CollapsibleProps) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
 
   return (
-    <div className="border border-gray-200 rounded-lg overflow-hidden">
+    <div className={`border border-border rounded-lg overflow-hidden ${className}`}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full px-4 py-3 bg-gray-50 hover:bg-gray-100 flex items-center justify-between transition-colors"
+        className="w-full px-4 py-3 bg-muted/50 hover:bg-muted flex items-center justify-between transition-colors"
       >
-        <span className="font-medium text-sm text-gray-900">{title}</span>
+        <span className="font-medium text-sm text-foreground">{title}</span>
         {isOpen ? (
-          <CaretDown className="w-4 h-4 text-gray-500" />
+          <CaretDown className="w-4 h-4 text-muted-foreground" />
         ) : (
-          <CaretRight className="w-4 h-4 text-gray-500" />
+          <CaretRight className="w-4 h-4 text-muted-foreground" />
         )}
       </button>
       {isOpen && (
-        <div className="p-4 bg-white">
+        <div className="p-4 bg-card">
           {children}
         </div>
       )}

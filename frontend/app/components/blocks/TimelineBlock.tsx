@@ -13,17 +13,17 @@ export function TimelineBlockRenderer({ block }: TimelineBlockRendererProps) {
         {sortedEvents.map((event, index) => (
           <div key={index} className="flex items-center flex-shrink-0">
             <div className="text-center">
-              <div className="text-xs text-gray-500 mb-1">{event.year}</div>
-              <div className="w-3 h-3 bg-blue-600 rounded-full mx-auto" />
-              <div 
-                className="text-xs text-gray-700 mt-1 max-w-[100px] truncate"
+              <div className="text-xs text-muted-foreground mb-1">{event.year}</div>
+              <div className="w-3 h-3 bg-primary rounded-full mx-auto" />
+              <div
+                className="text-xs text-foreground mt-1 max-w-[100px] truncate"
                 title={event.title}
               >
                 {event.title}
               </div>
             </div>
             {index < sortedEvents.length - 1 && (
-              <div className="w-8 h-0.5 bg-gray-300 mx-2" />
+              <div className="w-8 h-0.5 bg-border mx-2" />
             )}
           </div>
         ))}

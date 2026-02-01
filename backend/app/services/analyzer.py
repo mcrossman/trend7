@@ -90,7 +90,20 @@ class AnalyzerService:
         that meet the threshold. In a more sophisticated implementation,
         we would cluster results into multiple threads.
         """
+        # Handle both flat results and grouped results
         results = search_results.get('results', [])
+        
+        # If no flat results, check for data.results or data.groups
+        if not results and 'data' in search_results:
+            data = search_results['data']
+            if 'results' in data:
+                # Flat results in data
+                results = data['results']
+            elif 'groups' in data:
+                # Grouped results - extract from all groups
+                results = []
+                for group in data['groups']:
+                    results.extend(group.get('results', []))
         
         if not results:
             return []
@@ -213,16 +226,14 @@ class AnalyzerService:
         """
         years = []
         for result in results:
-            metadata = result.get('metadata', {})
-            for field in ['published_date', 'date', 'year']:
-                date_val = metadata.get(field)
-                if date_val and isinstance(date_val, str):
-                    try:
-                        year = int(date_val[:4])
-                        years.append(year)
-                        break
-                    except (ValueError, TypeError):
-                        continue
+            chunk = result.get('chunk', {})
+            date_val = chunk.get('published_at')
+            if date_val and isinstance(date_val, str):
+                try:
+                    year = int(date_val[:4])
+                    years.append(year)
+                except (ValueError, TypeError):
+                    continue
         
         if not years:
             return "evergreen"  # Default
@@ -243,34 +254,31 @@ class AnalyzerService:
         articles = []
         
         for result in results:
-            metadata = result.get('metadata', {})
+            chunk = result.get('chunk', {})
             
-            # Parse date
+            # Parse date from published_at
             published_date = None
-            for field in ['published_date', 'date']:
-                date_val = metadata.get(field)
-                if date_val:
-                    try:
-                        if isinstance(date_val, str):
-                            # Try different date formats
-                            for fmt in ['%Y-%m-%d', '%Y-%m-%dT%H:%M:%S', '%Y']:
-                                try:
-                                    published_date = datetime.strptime(date_val[:10], fmt)
-                                    break
-                                except ValueError:
-                                    continue
-                        if published_date:
-                            break
-                    except (ValueError, TypeError):
-                        continue
+            date_val = chunk.get('published_at')
+            if date_val:
+                try:
+                    if isinstance(date_val, str):
+                        # Try different date formats
+                        for fmt in ['%Y-%m-%d', '%Y-%m-%dT%H:%M:%S', '%Y']:
+                            try:
+                                published_date = datetime.strptime(date_val[:10], fmt)
+                                break
+                            except ValueError:
+                                continue
+                except (ValueError, TypeError):
+                    pass
             
             article = ArticleReference(
-                article_id=metadata.get('id', result.get('id', 'unknown')),
-                title=metadata.get('title', 'Untitled'),
-                author=metadata.get('author'),
+                article_id=str(chunk.get('article_id', result.get('id', 'unknown'))),
+                title=chunk.get('title', 'Untitled'),
+                author=chunk.get('author'),
                 published_date=published_date,
-                url=metadata.get('url'),
-                excerpt=result.get('chunk', metadata.get('excerpt')),
+                url=None,  # Not provided in chunk
+                excerpt=chunk.get('excerpt'),
                 relevance_score=result.get('score', 0.5)
             )
             articles.append(article)
@@ -285,9 +293,9 @@ class AnalyzerService:
         if not results:
             return "Unknown Topic"
         
-        # Use top result title as base
-        top_metadata = results[0].get('metadata', {})
-        title = top_metadata.get('title', 'Unknown Topic')
+        # Use top result title as base (from chunk, not metadata)
+        top_chunk = results[0].get('chunk', {})
+        title = top_chunk.get('title', 'Unknown Topic')
         
         # Try to extract key terms (simplified)
         # Remove common stop words and take first few meaningful words
@@ -305,16 +313,14 @@ class AnalyzerService:
         """Generate an explanation for the thread."""
         years = []
         for result in results:
-            metadata = result.get('metadata', {})
-            for field in ['published_date', 'date', 'year']:
-                date_val = metadata.get(field)
-                if date_val and isinstance(date_val, str):
-                    try:
-                        year = int(date_val[:4])
-                        years.append(year)
-                        break
-                    except (ValueError, TypeError):
-                        continue
+            chunk = result.get('chunk', {})
+            date_val = chunk.get('published_at')
+            if date_val and isinstance(date_val, str):
+                try:
+                    year = int(date_val[:4])
+                    years.append(year)
+                except (ValueError, TypeError):
+                    continue
         
         if years:
             year_range = f"{min(years)}-{max(years)}"

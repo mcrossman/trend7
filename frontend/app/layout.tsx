@@ -1,21 +1,15 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Noto_Serif } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
+import ThemeProvider from "./components/theme/ThemeProvider";
 
-const notoSerif = Noto_Serif({subsets:['latin'],variable:'--font-sans'});
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const inter = Inter({
   subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+  variable: "--font-sans",
 });
 
 export const metadata: Metadata = {
-  title: 'DejaNews',
+  title: 'TrendCloset Slackbot',
   description: 'Identify and resurface historical Atlantic stories',
 };
 
@@ -25,11 +19,33 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={notoSerif.variable}>
+    <html lang="en" className={inter.variable} suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                function getTheme() {
+                  const stored = localStorage.getItem('theme');
+                  if (stored) {
+                    return stored;
+                  }
+                  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+                }
+                
+                const theme = getTheme();
+                document.documentElement.classList.toggle('dark', theme === 'dark');
+              })();
+            `,
+          }}
+        />
+      </head>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen`}
+        className={`${inter.variable} font-sans antialiased min-h-screen`}
       >
-        {children}
+        <ThemeProvider>
+          {children}
+        </ThemeProvider>
       </body>
     </html>
   );

@@ -112,12 +112,19 @@ export interface AnalysisResponse {
   };
 }
 
+export interface ProactiveThread {
+  thread_id: string;
+  central_topic: string;
+  thread_type: 'evergreen' | 'event_driven' | 'novel_concept';
+  relevance_score: number;
+  article_count: number;
+  blocks: Block[];
+}
+
 export interface ProactiveResponse {
   success: boolean;
-  data: {
-    generated_at: string;
-    threads: Thread[];
-  };
+  generated_at: string;
+  threads: ProactiveThread[];
 }
 
 // Trends demo types
