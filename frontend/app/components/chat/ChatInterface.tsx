@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { PaperPlaneRightIcon, TextTIcon, FileTextIcon, TrashIcon, TrendUpIcon, ArrowsClockwiseIcon } from '@phosphor-icons/react';
-import { analyzeText, analyzeArticle, getProactiveSuggestions, purgeQueue } from '@/app/lib/api';
+import { analyzeText, analyzeArticle, getProactiveSuggestions, purgeQueue, triggerTrendsWatch, triggerWatchCached } from '@/app/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
@@ -34,8 +34,10 @@ export default function ChatInterface() {
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingTrends, setIsLoadingTrends] = useState(false);
   const [isPurgingQueue, setIsPurgingQueue] = useState(false);
+  const [isTriggeringWatch, setIsTriggeringWatch] = useState(false);
   const [lastTrendUpdate, setLastTrendUpdate] = useState<string | null>(null);
   const [purgeMessage, setPurgeMessage] = useState<string | null>(null);
+  const [watchMessage, setWatchMessage] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -95,6 +97,48 @@ export default function ChatInterface() {
       setIsPurgingQueue(false);
       // Clear message after 5 seconds
       setTimeout(() => setPurgeMessage(null), 5000);
+    }
+  };
+
+  const handleTriggerWatch = async () => {
+    setIsTriggeringWatch(true);
+    setWatchMessage(null);
+    try {
+      const response = await triggerTrendsWatch(false);
+      setWatchMessage(`✅ Found ${response.new_matches} matches from ${response.trends_checked} trends`);
+      // Refresh trends after watch cycle
+      await fetchTrendMessages();
+    } catch (error) {
+      console.error('Error triggering watch:', error);
+      const errorMsg = error instanceof Error ? error.message : 'Failed to trigger watch';
+      // Check if it's a rate limit error
+      if (errorMsg.includes('429') || errorMsg.includes('rate limit')) {
+        setWatchMessage('⚠️ Google Trends rate limited. Use "Watch Cached" button instead.');
+      } else {
+        setWatchMessage(errorMsg);
+      }
+    } finally {
+      setIsTriggeringWatch(false);
+      // Clear message after 5 seconds
+      setTimeout(() => setWatchMessage(null), 5000);
+    }
+  };
+
+  const handleTriggerWatchCached = async () => {
+    setIsTriggeringWatch(true);
+    setWatchMessage(null);
+    try {
+      const response = await triggerWatchCached(10);
+      setWatchMessage(`✅ Found ${response.new_matches} matches from ${response.trends_checked} cached trends (no Google API call)`);
+      // Refresh trends after watch cycle
+      await fetchTrendMessages();
+    } catch (error) {
+      console.error('Error triggering cached watch:', error);
+      setWatchMessage(error instanceof Error ? error.message : 'Failed to trigger cached watch');
+    } finally {
+      setIsTriggeringWatch(false);
+      // Clear message after 5 seconds
+      setTimeout(() => setWatchMessage(null), 5000);
     }
   };
 
@@ -235,6 +279,11 @@ export default function ChatInterface() {
               {purgeMessage}
             </span>
           )}
+          {watchMessage && (
+            <span className="text-xs text-blue-600 font-medium">
+              {watchMessage}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -265,6 +314,36 @@ export default function ChatInterface() {
               <TrashIcon className="size-4" />
             )}
             <span className="ml-1">Purge Queue</span>
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleTriggerWatch}
+            disabled={isTriggeringWatch}
+            className="text-muted-foreground hover:text-foreground"
+            title="Run trends watch cycle with Google Trends"
+          >
+            {isTriggeringWatch ? (
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current" />
+            ) : (
+              <TrendUpIcon className="size-4" />
+            )}
+            <span className="ml-1">Run Watch</span>
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleTriggerWatchCached}
+            disabled={isTriggeringWatch}
+            className="text-muted-foreground hover:text-foreground"
+            title="Use cached trends only (no Google API call) - for 429 errors"
+          >
+            {isTriggeringWatch ? (
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current" />
+            ) : (
+              <ArrowsClockwiseIcon className="size-4" />
+            )}
+            <span className="ml-1">Watch Cached</span>
           </Button>
           {hasUserMessages && (
             <Button

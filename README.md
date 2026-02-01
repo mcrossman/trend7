@@ -68,6 +68,7 @@ You can work with downloaded article JSON files directly:
 # - POST /api/v1/analyze/local-article - Analyze local article ONLY
 # - POST /api/v1/analyze/article - Analyze via API ONLY
 # - POST /api/v1/articles/bulk-import - Import directory of JSON files
+```
 
 ## License
 

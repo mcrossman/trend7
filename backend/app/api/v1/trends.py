@@ -126,6 +126,11 @@ class InterestOverTimeResponse(BaseModel):
 
 # API Endpoints
 
+class WatchWithCachedRequest(BaseModel):
+    """Request to trigger watch using only cached trends."""
+    max_trends: int = 10  # Limit to prevent overwhelming Infactory
+
+
 @router.post("/watch", response_model=WatchResponse)
 async def trigger_trends_watch(
     request: TriggerWatchRequest = TriggerWatchRequest(),
@@ -138,6 +143,8 @@ async def trigger_trends_watch(
     and populates the proactive feed queue.
     
     - **force_refresh**: If True, ignores cache and fetches fresh trends from Google
+    
+    Note: If Google Trends returns 429 (rate limit), falls back to cached trends.
     """
     try:
         # Initialize service with fresh client if forcing refresh
@@ -151,8 +158,8 @@ async def trigger_trends_watch(
             db.query(Trend).filter(Trend.expires_at <= datetime.utcnow()).delete()
             db.commit()
         
-        # Run watch cycle
-        queue_entries = await service.watch_and_populate()
+        # Run watch cycle (limited to 10 trends to avoid rate limits)
+        queue_entries = await service.watch_and_populate(max_trends=10)
         
         # Get stats
         current_trends = service.get_current_trends()
@@ -160,12 +167,70 @@ async def trigger_trends_watch(
         return WatchResponse(
             success=True,
             trends_checked=len(current_trends),
-            new_matches=queue_entries,  # This is the total matches found
+            new_matches=queue_entries,
             queue_entries_added=queue_entries
         )
         
     except Exception as e:
+        error_str = str(e).lower()
+        # Check if it's a rate limit error
+        if '429' in error_str or 'rate limit' in error_str or 'too many requests' in error_str:
+            print(f"Google Trends rate limited (429), falling back to cached trends...")
+            try:
+                # Fallback to cached-only mode
+                service = TrendsWatchService(db=db)
+                queue_entries = await service.watch_and_populate(use_cached_only=True, max_trends=10)
+                current_trends = service.get_current_trends()
+                
+                return WatchResponse(
+                    success=True,
+                    trends_checked=len(current_trends),
+                    new_matches=queue_entries,
+                    queue_entries_added=queue_entries
+                )
+            except Exception as fallback_error:
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Google Trends rate limited and no cached trends available. Please try again later."
+                )
+        
         raise HTTPException(status_code=500, detail=f"Error triggering trends watch: {str(e)}")
+
+
+@router.post("/watch/cached", response_model=WatchResponse)
+async def trigger_watch_cached(
+    request: WatchWithCachedRequest = WatchWithCachedRequest(),
+    db: Session = Depends(get_db)
+):
+    """
+    Trigger watch cycle using only cached trends (no Google Trends API call).
+    
+    Use this when Google Trends is rate limiting (429 errors).
+    Processes existing cached trends from the database.
+    
+    - **max_trends**: Maximum number of cached trends to process (default: 10)
+    """
+    try:
+        service = TrendsWatchService(db=db)
+        
+        # Run watch cycle with cached trends only
+        queue_entries = await service.watch_and_populate(
+            use_cached_only=True,
+            max_trends=request.max_trends
+        )
+        
+        # Get stats
+        current_trends = service.get_current_trends()
+        
+        return WatchResponse(
+            success=True,
+            trends_checked=len(current_trends),
+            new_matches=queue_entries,
+            queue_entries_added=queue_entries
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing cached trends: {str(e)}")
 
 
 @router.get("/current", response_model=CurrentTrendsResponse)

@@ -45,12 +45,24 @@ class TrendsWatchService:
         self.formatter = formatter or BlockFormatter()
         self.confidence = confidence_calculator or ConfidenceCalculator()
     
-    async def watch_and_populate(self) -> int:
+    async def watch_and_populate(self, use_cached_only: bool = False, max_trends: int = 10) -> int:
         """
         Main watch cycle. Returns number of new queue entries created.
+        
+        Args:
+            use_cached_only: If True, only use cached trends, don't fetch from Google
+            max_trends: Maximum number of trends to process (default: 10)
         """
-        # 1. Get fresh trends (or cached if recent)
-        trends = await self._get_cached_or_fetch_trends()
+        # 1. Get trends (cached or fresh)
+        if use_cached_only:
+            trends = self._get_cached_trends()
+            if not trends:
+                print("No cached trends available")
+                return 0
+            print(f"Using {len(trends)} cached trends (limited to {max_trends})")
+            trends = trends[:max_trends]
+        else:
+            trends = await self._get_cached_or_fetch_trends()
         
         if not trends:
             print("No trends available")
